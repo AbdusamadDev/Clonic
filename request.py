@@ -1,37 +1,59 @@
-from wsgiref.simple_server import make_server
-from typing import Dict, Callable, Any
+from socketserver import BaseRequestHandler, BaseServer
+import json
 
 
-class App:
-    def __init__(self) -> None:
-        self.headers = [("Content-Type", "text/plain")]
-        self.routes: Dict = {}
+class Request(BaseRequestHandler):
+    """Base Class for handling Requests coming from HTTP Client"""
 
-    def __call__(self, environ, start_response) -> Any:
-        url = environ.get("PATH_INFO", "")
-        method = environ.get("REQUEST_METHOD", "")
-        handler = self.routes.get((url, method))
+    def __init__(self, request, client_address, server: BaseServer) -> None:
+        self.url = None
+        self.data = None
+        self.json = None
+        self.method = None
+        self.protocol = None
+        # self.form_data = {}
+        self.headers = {}
+        super().__init__(request, client_address, server)
 
-        if handler:
-            response = handler(environ)
-            start_response(response.status, response.headers)
-            return [response.body]
-        else:
-            start_response("404 Not Found", self.headers)
-            return [b"Not Found"]
+    def __str__(self) -> str:
+        return f"<{type(self)}>: {self.__class__.__name__}"
 
-    def get_headers(self):
-        return self.headers
+    def handle(self) -> None:
+        """
+        Hanlding the data coming from client no matter what method request is
+        """
+        self.data = self.request.recv(4096).decode("utf-8")
+        self.parse_request(self.data)
+        print(self.json)
+        print(self.url)
+        # print(self.form_data)
+        print(self.protocol)
+        print(self.headers)
+        print(self.method)
 
-    def route(self, url, method):
-        def inner(func: Callable):
-            self.routes[(url, method)] = func
+    def parse_request(self, data):
+        """Parse each data like headers, body, http method of the coming request from client"""
 
-        return inner
+        lines = data.split("\r\n")
+        start_line = lines[0].split()
 
-    def run(self):
-        with make_server("127.0.0.1", 8000, app=self) as server:
-            print(
-                "Server running on localhost: http://127.0.0.1:8000\nCtrl+C to quit the server"
-            )
-            server.serve_forever()
+        self.method = start_line[0]
+        self.url = start_line[1]
+        self.protocol = start_line[2]
+
+        # Parsing headers
+        for line in lines[1:]:
+            if line == '':
+                break  # Headers are done, body will follow
+            key, value = line.split(': ', 1)
+            self.headers[key] = value
+
+        # If there's JSON data (POST, PUT requests), parse it
+        body = "\r\n".join(lines[len(self.headers) + 2:])
+        print("Body: ", body)
+        if body and 'Content-Type' in self.headers and self.headers['Content-Type'] == 'application/json':
+            self.json = json.loads(body)
+        # else:
+        #     self.form_data = {
+        #         "data": str(body.split("Content-Disposition: form-data; "))
+        #     }
